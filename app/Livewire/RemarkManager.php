@@ -2,25 +2,40 @@
 
 namespace App\Livewire;
 
-use Livewire\Component;
 use App\Models\Remark;
+use Livewire\Component;
+use Livewire\Attributes\On;
+use Livewire\WithPagination;
+use App\Events\RemarkCreated;
+use Livewire\Attributes\Computed;
 use Illuminate\Support\Facades\Auth;
 
 class RemarkManager extends Component
 {
+    use WithPagination;
+
     public $showModal = false;
     public $remarkText = '';
-    public $remarks = [];
+    public $successMessage = '';
 
     protected $rules = [
         'remarkText' => 'required|min:2'
     ];
 
-    public function mount()
+    /**
+     * COMPUTED PROPERTY (Livewire v4 best practice)
+     */
+    #[Computed]
+    public function remarks()
     {
-        $this->loadRemarks();
+        return Remark::with('user')
+            ->latest()
+            ->paginate(5);
     }
 
+    /**
+     * Open modal
+     */
     public function openModal()
     {
         $this->resetValidation();
@@ -28,27 +43,55 @@ class RemarkManager extends Component
         $this->showModal = true;
     }
 
+    /**
+     * Save remark
+     */
     public function saveRemark()
     {
         $this->validate();
 
-        Remark::create([
+        // Remark::create([
+        //     'user_id' => Auth::id(),
+        //     'remark' => $this->remarkText,
+        // ]);
+
+        $remark = Remark::create([
             'user_id' => Auth::id(),
             'remark' => $this->remarkText,
         ]);
 
+        // broadcast to other users
+        event(new RemarkCreated($remark));
+
+        // close modal
         $this->showModal = false;
         $this->remarkText = '';
 
-        $this->loadRemarks();
+        // success message
+        $this->successMessage = 'Remark added successfully.';
+
+        /** Cross-component communication
+        * Example:
+        * Component A → saves remark
+        * Component B → shows total count
+        * Component B will NOT auto-refresh.
+        */
+        $this->dispatch('remark-created');
     }
 
-    public function loadRemarks()
+    #[On('remark-created')]
+    public function refreshRemarks()
     {
-        $this->remarks = Remark::with('user')
-            ->latest()
-            ->get()
-            ->toArray();
+        $this->resetPage();
+    }
+
+    #[On('echo:remarks,.remark.created')]
+    public function refreshFromBroadcast()
+    {
+        logger('Broadcast received in Livewire');
+
+        unset($this->remarks);
+        $this->resetPage();
     }
 
     public function render()
